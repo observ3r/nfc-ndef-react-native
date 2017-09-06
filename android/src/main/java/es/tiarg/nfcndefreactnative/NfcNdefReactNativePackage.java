@@ -30,7 +30,8 @@ public class NfcNdefReactNativePackage implements ReactPackage {
      * listed here. Also listing a native module here doesn't imply that the JS implementation of it
      * will be automatically included in the JS bundle.
      */
-    @Override
+    // Deprecated RN 0.47
+    // @Override
     public List<Class<? extends JavaScriptModule>> createJSModules() {
         return Collections.emptyList();
     }
