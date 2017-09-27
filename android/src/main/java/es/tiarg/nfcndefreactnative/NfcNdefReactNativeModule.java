@@ -93,95 +93,115 @@ class NfcNdefReactNativeModule extends ReactContextBaseJavaModule implements Act
 		return record;
 	}
 
+    private String bytesToHexString(byte[] src) {
+        StringBuilder stringBuilder = new StringBuilder("0x");
+        if (src == null || src.length <= 0) {
+            return null;
+        }
+
+        char[] buffer = new char[2];
+        for (int i = 0; i < src.length; i++) {
+            buffer[0] = Character.forDigit((src[i] >>> 4) & 0x0F, 16);
+            buffer[1] = Character.forDigit(src[i] & 0x0F, 16);
+            System.out.println(buffer);
+            stringBuilder.append(buffer);
+        }
+
+        return stringBuilder.toString();
+    }
+
     private class ThreadLectura implements Runnable {
         public void run() {
             if (tag != null && (idOperation || readOperation || writeOperation)) {
 				//Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() Op: " + String.valueOf(readOperation) + " " + String.valueOf(writeOperation) );
 				try {
 
-					//ByteBuffer bb = ByteBuffer.wrap(tag.getId());
-					//int id = bb.getInt();
+                    ByteBuffer bb = ByteBuffer.wrap(tag.getId());
+                    int id = bb.getInt();
 
 					if (idOperation) {
 						//Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() ID Op: " + Integer.toString(id) );
 
-						WritableMap idData = Arguments.createMap();
-						idData.putInt("id", id);
-						reactContext
-							.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-							.emit("onTagDetected", idData);
+                        WritableMap idData = Arguments.createMap();
+                        idData.putString("id", bytesToHexString(bb.array()));
+                        tag = null;
+                        index = 0;
+                        idOperation = false;
+                        readOperation = false;
+                        writeOperation = false;
+                        reactContext
+                                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                .emit("onTagDetected", idData);
 
-                    	idOperation = false;
+                    } else if (readOperation) {
+                        Ndef ndef_tag = Ndef.get(tag);
+                        ndef_tag.connect();
 
-					} else if (readOperation) {
-						Ndef ndef_tag = Ndef.get(tag);
-						ndef_tag.connect();
+                        if (!ndef_tag.isConnected()) {
+                            return;
+                        }
+                        // Use the cached one if you want... but if you write and the read, you wont get what you wrote.
+                        //NdefMessage mes = ndef_tag.getCachedNdefMessage();
+                        NdefMessage mes = ndef_tag.getNdefMessage();
+                        NdefRecord[] ndef_records = mes.getRecords();
+                        WritableArray recs = new WritableNativeArray();
 
-						if (!ndef_tag.isConnected()) {
-							return;
-						}
-						// Use the cached one if you want... but if you write and the read, you wont get what you wrote.
-						//NdefMessage mes = ndef_tag.getCachedNdefMessage();
-						NdefMessage mes = ndef_tag.getNdefMessage();
-						NdefRecord[] ndef_records = mes.getRecords();
-						WritableArray recs = new WritableNativeArray();
-
-						for (int i = 0; i<ndef_records.length; i++) {
-							recs.pushString(new String(ndef_records[i].getPayload(), "US-ASCII"));
-						}
-						//Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() Payloads: " + records[0] );
+                        for (int i = 0; i<ndef_records.length; i++) {
+                            recs.pushString(new String(ndef_records[i].getPayload(), "US-ASCII"));
+                        }
+                        //Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() Payloads: " + records[0] );
 
                         reactContext
                                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                                 .emit("onTagRead", recs);
-					
-						readOperation = false;
-						ndef_tag.close();
 
-					} else if (writeOperation) {
+                        readOperation = false;
+                        ndef_tag.close();
 
-						int s = to_write.size();
-						NdefRecord[] recs = new NdefRecord[s];
-						Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() len: " + Integer.toString(s));
+                    } else if (writeOperation) {
 
-						// This one's just for logging and sending to React
-						WritableArray wrote = new WritableNativeArray();
+                        int s = to_write.size();
+                        NdefRecord[] recs = new NdefRecord[s];
+                        Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() len: " + Integer.toString(s));
 
-						for (int i = 0; i<s; i++) {
-							String cur = to_write.getString(i);
-							Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() Writing: " + cur);
-							recs[i] = createTextRecord(cur, new Locale("us"), true);
-							wrote.pushString(cur);
-						}
+                        // This one's just for logging and sending to React
+                        WritableArray wrote = new WritableNativeArray();
 
-						NdefMessage mes = new NdefMessage(recs);
-						NdefFormatable form_tag = NdefFormatable.get(tag);
+                        for (int i = 0; i<s; i++) {
+                            String cur = to_write.getString(i);
+                            Log.i("ReactNative", "[+] [NfcNdefReactNative] -> ThreadLectura.run() Writing: " + cur);
+                            recs[i] = createTextRecord(cur, new Locale("us"), true);
+                            wrote.pushString(cur);
+                        }
 
-						if (form_tag == null) {
-							Ndef ndef_f_tag = Ndef.get(tag);
-							ndef_f_tag.connect();
+                        NdefMessage mes = new NdefMessage(recs);
+                        NdefFormatable form_tag = NdefFormatable.get(tag);
 
-							if (!ndef_f_tag.isConnected()) {
-								return;
-							}
+                        if (form_tag == null) {
+                            Ndef ndef_f_tag = Ndef.get(tag);
+                            ndef_f_tag.connect();
 
-							ndef_f_tag.writeNdefMessage(mes);
-							ndef_f_tag.close();
-						} else {
-							form_tag.connect();
-							form_tag.format(mes);	
-							form_tag.close();
-						}
-						
-						reactContext
-								.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-								.emit("onTagWrite", wrote);
+                            if (!ndef_f_tag.isConnected()) {
+                                return;
+                            }
 
-						writeOperation = false;
-					}
+                            ndef_f_tag.writeNdefMessage(mes);
+                            ndef_f_tag.close();
+                        } else {
+                            form_tag.connect();
+                            form_tag.format(mes);
+                            form_tag.close();
+                        }
 
-					//tag = null;
-					return;
+                        reactContext
+                                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                .emit("onTagWrite", wrote);
+
+                        writeOperation = false;
+                    }
+
+                    tag = null;
+                    return;
 
                 } catch (Exception ex) {
                     WritableMap error = Arguments.createMap();
@@ -255,7 +275,9 @@ class NfcNdefReactNativeModule extends ReactContextBaseJavaModule implements Act
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
         final PendingIntent pendingIntent = PendingIntent.getActivity(activity.getApplicationContext(), 0, intent, 0);
-        adapter.enableForegroundDispatch(activity, pendingIntent, null, null);
+        if (adapter != null && adapter.isEnabled()) {
+            adapter.enableForegroundDispatch(activity, pendingIntent, null, null);
+        }
     }
 
     public static void stopForegroundDispatch(final Activity activity, NfcAdapter adapter) {
